@@ -19,14 +19,14 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger(__name__)
 
-BOT_TOKEN = os.getenv("8677231120:AAHU1SJm13ry0E0Pby2yRX8EleH6gPty-BM", "")
-API_KEY = os.getenv("np_live_7yqWlo5XyEArNl7f86kzjEn-wWgJ338qmoVGOykNZqY", "")
+BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
+API_KEY = os.getenv("NUMBERPANEL_API_KEY", "")
 BASE_URL = os.getenv(
     "NUMBERPANEL_BASE_URL", "https://numberpanel.tech"
 ).rstrip("/")
-GROUP_ID = os.getenv("-1004470205927", "")
-CHANNEL_URL = os.getenv("CHANNEL_URL", "https://t.me/challeh61")
-HELP_URL = os.getenv("HELP_URL", "https://t.me/@bluebear10")
+GROUP_ID = os.getenv("TELEGRAM_GROUP_ID", "")
+CHANNEL_URL = os.getenv("CHANNEL_URL", "https://t.me/")
+HELP_URL = os.getenv("HELP_URL", "https://t.me/")
 
 # Configure these from the official NumberPanel API docs.
 SERVICES_PATH = os.getenv(
