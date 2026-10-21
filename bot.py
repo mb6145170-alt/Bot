@@ -4,11 +4,7 @@ import logging
 import httpx
 
 from dotenv import load_dotenv
-from telegram import (
-    Update,
-    InlineKeyboardButton,
-    InlineKeyboardMarkup,
-)
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -17,11 +13,7 @@ from telegram.ext import (
 )
 
 load_dotenv()
-
-logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    level=logging.INFO,
-)
+logging.basicConfig(level=logging.INFO)
 log = logging.getLogger(__name__)
 
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
@@ -33,25 +25,22 @@ BASE_URL = os.getenv(
 CHANNEL_URL = os.getenv("CHANNEL_URL", "https://t.me/challeh61")
 HELP_URL = os.getenv("HELP_URL", "https://t.me/bluebear10")
 
+# Verify these endpoints against NumberPanel's current API docs.
 SERVICES_PATH = "/api/services"
 COUNTRIES_PATH = "/api/countries"
-NUMBERS_PATH = "/api/my_numbers"
-OTP_HISTORY_PATH = "/api/my_otps"
+ORDER_PATH = "/api/request_number"
+POLL_PATH = "/api/latest_otp"
+HISTORY_PATH = "/api/my_numbers"
 
 
-def menu():
+def home_keyboard():
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton(
-            "💎 GET NUMBER", callback_data="services"
-        )],
+        [InlineKeyboardButton("💎 GET NUMBER", callback_data="services")],
         [
-            InlineKeyboardButton(
-                "🌍 COUNTRIES", callback_data="countries"
-            ),
-            InlineKeyboardButton(
-                "👑 MY HISTORY", callback_data="history"
-            ),
+            InlineKeyboardButton("🌍 COUNTRY", callback_data="countries"),
+            InlineKeyboardButton("👑 HISTORY", callback_data="history"),
         ],
+        [InlineKeyboardButton("🔄 POLL OTP", callback_data="poll")],
         [
             InlineKeyboardButton("📢 CHANNEL", url=CHANNEL_URL),
             InlineKeyboardButton("💬 HELP", url=HELP_URL),
@@ -59,288 +48,282 @@ def menu():
     ])
 
 
-def back_button():
+def back_keyboard(target="home"):
     return InlineKeyboardMarkup([[
-        InlineKeyboardButton("⬅️ BACK", callback_data="home")
+        InlineKeyboardButton("⬅️ BACK", callback_data=target)
     ]])
 
 
 async def api_request(method, path, **kwargs):
     headers = {"Accept": "application/json"}
-
     if API_KEY:
         headers["Authorization"] = f"Bearer {API_KEY}"
 
     async with httpx.AsyncClient(timeout=25) as client:
         response = await client.request(
-            method,
-            BASE_URL + path,
-            headers=headers,
-            **kwargs,
+            method, BASE_URL + path, headers=headers, **kwargs
         )
         response.raise_for_status()
         return response.json()
 
 
-def get_items(data, *keys):
-    """Accept common JSON list response formats."""
+def get_list(data, *keys):
     if isinstance(data, list):
         return data
-
     if isinstance(data, dict):
         for key in keys:
-            value = data.get(key)
-            if isinstance(value, list):
-                return value
-
+            if isinstance(data.get(key), list):
+                return data[key]
     return []
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = (
-        "╭━━━ 💎 PREMIUM NUMBER BOT ━━━╮\n"
-        "┃\n"
-        "┃ 👑 Welcome!\n"
-        "┃ ⚡ Fast service menu\n"
-        "┃ 🌍 Available services & countries\n"
-        "┃ 🔐 Secure configuration\n"
-        "┃\n"
-        "╰━━━━━━━━━━━━━━━━━━━━━━╯\n\n"
-        "👇 Select an option:"
-    )
-
     await update.effective_message.reply_text(
-        text, reply_markup=menu()
+        "╭━━ 💎 PREMIUM NUMBER BOT ━━╮\n"
+        "┃ 👑 Welcome!\n"
+        "┃ 📱 Select service\n"
+        "┃ 🌍 Select country\n"
+        "┃ 🔄 Check OTP\n"
+        "╰━━━━━━━━━━━━━━━━━━━━╯\n\n"
+        "👇 Choose an option:",
+        reply_markup=home_keyboard(),
     )
 
 
 async def show_services(query):
     data = await api_request("GET", SERVICES_PATH)
-    services = get_items(data, "services", "data", "results")
-
-    keyboard = []
+    services = get_list(data, "services", "data", "results")
+    buttons = []
 
     for item in services[:50]:
         if not isinstance(item, dict):
             continue
 
         name = str(item.get("name", ""))
-        key = str(item.get("key", item.get("id", item.get("code", ""))))
+        key = str(item.get("key") or item.get("id") or item.get("code") or "")
         count = item.get("count", 0)
 
         if name and key:
-            keyboard.append([InlineKeyboardButton(
-                f"📱 {name[:30]} | 🔢 {count}",
-                callback_data=f"service:{key[:40]}",
+            buttons.append([InlineKeyboardButton(
+                f"📱 {name[:28]} | 🔢 {count}",
+                callback_data=f"svc:{key[:35]}",
             )])
 
-    keyboard.append([
-        InlineKeyboardButton("⬅️ BACK", callback_data="home")
-    ])
+    buttons.append([InlineKeyboardButton("🏠 HOME", callback_data="home")])
 
-    if not keyboard or len(keyboard) == 1:
+    if len(buttons) == 1:
         await query.edit_message_text(
-            "⚠️ No services found.\n"
-            "Check the API response and account access.",
-            reply_markup=back_button(),
+            "⚠️ No services found.",
+            reply_markup=back_keyboard(),
         )
         return
 
     await query.edit_message_text(
-        "💎 SELECT SERVICE\n\nChoose a service:",
-        reply_markup=InlineKeyboardMarkup(keyboard),
+        "💎 SELECT SERVICE",
+        reply_markup=InlineKeyboardMarkup(buttons),
     )
 
 
 async def show_countries(query, service=None):
-    path = COUNTRIES_PATH
+    data = await api_request("GET", COUNTRIES_PATH)
+    countries = get_list(data, "countries", "data", "results")
+    buttons = []
 
-    if service:
-        path += "?service=" + service
-
-    data = await api_request("GET", path)
-    countries = get_items(data, "countries", "data", "results")
-
-    keyboard = []
-
-    for country in countries[:50]:
-        if not isinstance(country, dict):
-            continue
-
-        name = str(country.get(
-            "name", country.get("country", "")
-        ))
-        code = str(country.get(
-            "code", country.get("key", country.get("id", ""))
-        ))
-
-        if name and code:
-            keyboard.append([InlineKeyboardButton(
-                f"🌍 {name[:35]}",
-                callback_data=f"country:{service or 'random'}:{code[:25]}",
-            )])
-
-    keyboard.append([
-        InlineKeyboardButton("🎲 Random country",
-                             callback_data=f"country:{service or 'random'}:random")
-    ])
-    keyboard.append([
-        InlineKeyboardButton("⬅️ BACK", callback_data="home")
-    ])
-
-    await query.edit_message_text(
-        "🌍 SELECT COUNTRY",
-        reply_markup=InlineKeyboardMarkup(keyboard),
-    )
-
-
-async def show_history(query):
-    data = await api_request("GET", OTP_HISTORY_PATH + "?limit=20")
-    items = get_items(data, "otps", "history", "data", "results")
-
-    if not items:
-        data = await api_request("GET", NUMBERS_PATH)
-        items = get_items(data, "numbers", "data", "results")
-
-    if not items:
-        await query.edit_message_text(
-            "📭 No history or active numbers were returned.",
-            reply_markup=back_button(),
-        )
-        return
-
-    lines = ["👑 YOUR HISTORY\n"]
-
-    for item in items[:15]:
+    for item in countries[:50]:
         if not isinstance(item, dict):
             continue
 
-        number = str(item.get("number", "Unknown"))
-        service = str(item.get("service", "Unknown"))
-        status = str(item.get("status", "Unknown"))
-
-        lines.append(
-            f"📱 {number[:35]}\n"
-            f"💎 {service[:25]} | {status[:25]}\n"
+        name = str(
+            item.get("name") or item.get("country") or item.get("title") or ""
+        )
+        code = str(
+            item.get("code") or item.get("key")
+            or item.get("id") or item.get("country_code") or ""
         )
 
+        if name and code and service:
+            buttons.append([InlineKeyboardButton(
+                f"🌍 {name[:30]}",
+                callback_data=f"cty:{service[:18]}:{code[:18]}",
+            )])
+
+    buttons.append([
+        InlineKeyboardButton("⬅️ SERVICES", callback_data="services")
+    ])
+
+    if len(buttons) == 1:
+        await query.edit_message_text(
+            "⚠️ Country list পাওয়া যায়নি। API endpoint যাচাই করো।",
+            reply_markup=back_keyboard(),
+        )
+        return
+
     await query.edit_message_text(
-        "\n".join(lines)[:4000],
-        reply_markup=back_button(),
+        "🌍 SELECT COUNTRY",
+        reply_markup=InlineKeyboardMarkup(buttons),
     )
 
 
-async def request_number(query, service, country):
-    """Request a number through the documented provider endpoint."""
-    payload = {"service": service, "country": country}
-
+async def order_number(query, context, service, country):
+    # Confirm the real endpoint and required fields before ordering.
     data = await api_request(
-        "POST", "/api/request_number", json=payload
+        "POST",
+        ORDER_PATH,
+        json={"service": service, "country": country},
     )
 
     if not isinstance(data, dict):
-        raise ValueError("Unexpected number API response")
+        raise ValueError("Unexpected order response")
 
     number = data.get("number")
     if not number:
-        message = str(data.get("message", data.get("error", "Unknown error")))
+        msg = data.get("message") or data.get("error") or "No number returned"
         await query.edit_message_text(
-            f"⚠️ Number request failed.\n{message[:500]}",
-            reply_markup=back_button(),
+            f"⚠️ Order failed: {str(msg)[:300]}",
+            reply_markup=back_keyboard(),
         )
         return
 
     number = str(number)
-    user_text = (
-        "💎 NUMBER RESPONSE\n\n"
-        f"📱 Service: {service}\n"
-        f"☎️ Number: {number}\n\n"
-        "Use only for accounts and verification workflows "
-        "you are authorized to test."
-    )
+    context.user_data["active_number"] = number
+    context.user_data["active_service"] = service
 
     await query.edit_message_text(
-        user_text, reply_markup=back_button()
+        "💎 NUMBER RECEIVED\n\n"
+        f"📱 Service: {service}\n"
+        f"☎️ Number: {number}",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("🔄 POLL OTP", callback_data="poll")],
+            [InlineKeyboardButton("🏠 HOME", callback_data="home")],
+        ]),
     )
 
-    # Group receives a masked number, not the full number.
     if GROUP_ID:
-        masked = number
-        if len(number) > 5:
-            masked = number[:5] + "*" * (len(number) - 5)
-
+        masked = number[:5] + "*" * max(0, len(number) - 5)
         try:
-            await query.get_bot().send_message(
+            await context.bot.send_message(
                 chat_id=GROUP_ID,
-                text=(
-                    "💎 NEW NUMBER NOTICE\n\n"
-                    f"📱 Service: {service}\n"
-                    f"☎️ Number: {masked}"
-                ),
+                text=f"💎 NEW NUMBER\n📱 {service}\n☎️ {masked}",
             )
         except Exception:
-            log.exception("Could not send group notice")
+            log.exception("Group notification failed")
 
 
-async def handle_button(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE,
-):
+async def poll_otp(query, context):
+    number = context.user_data.get("active_number")
+    if not number:
+        await query.edit_message_text(
+            "⚠️ আগে একটি নম্বর অর্ডার করো।",
+            reply_markup=back_keyboard(),
+        )
+        return
+
+    data = await api_request(
+        "GET", POLL_PATH, params={"number": number}
+    )
+
+    if not isinstance(data, dict):
+        raise ValueError("Unexpected OTP response")
+
+    otp = data.get("otp") or data.get("code")
+    sms = data.get("sms")
+
+    if otp or sms:
+        message = (
+            "✅ OTP RECEIVED!\n\n"
+            f"📱 Number: {number}\n"
+            f"🔐 OTP: {otp or sms}"
+        )
+    else:
+        message = (
+            "⏳ OTP এখনো আসেনি।\n\n"
+            f"📱 Number: {number}\n"
+            "কিছুক্ষণ পর আবার Poll করো।"
+        )
+
+    await query.edit_message_text(
+        message,
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("🔄 POLL AGAIN", callback_data="poll")],
+            [InlineKeyboardButton("🏠 HOME", callback_data="home")],
+        ]),
+    )
+
+
+async def show_history(query):
+    data = await api_request("GET", HISTORY_PATH)
+    items = get_list(data, "numbers", "data", "results")
+
+    if not items:
+        await query.edit_message_text(
+            "📭 কোনো History পাওয়া যায়নি।",
+            reply_markup=back_keyboard(),
+        )
+        return
+
+    lines = ["👑 MY HISTORY\n"]
+    for item in items[:15]:
+        if isinstance(item, dict):
+            lines.append(
+                f"📱 {item.get('number', 'Unknown')}\n"
+                f"💎 {item.get('service', 'Unknown')}\n"
+                f"📌 {item.get('status', 'Unknown')}\n"
+            )
+
+    await query.edit_message_text(
+        "\n".join(lines)[:4000],
+        reply_markup=back_keyboard(),
+    )
+
+
+async def handle_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    action = query.data
+    action = query.data or ""
 
     try:
         if action == "home":
             await query.edit_message_text(
                 "💎 PREMIUM NUMBER BOT\n\nChoose an option:",
-                reply_markup=menu(),
+                reply_markup=home_keyboard(),
             )
 
         elif action == "services":
             await show_services(query)
 
         elif action == "countries":
-            await show_countries(query)
+            await show_countries(
+                query, context.user_data.get("selected_service")
+            )
 
         elif action == "history":
             await show_history(query)
 
-        elif action.startswith("service:"):
+        elif action == "poll":
+            await poll_otp(query, context)
+
+        elif action.startswith("svc:"):
             service = action.split(":", 1)[1]
             context.user_data["selected_service"] = service
             await show_countries(query, service)
 
-        elif action.startswith("country:"):
+        elif action.startswith("cty:"):
             _, service, country = action.split(":", 2)
-
-            if service == "random":
-                service = context.user_data.get("selected_service")
-
-            if not service:
-                await query.edit_message_text(
-                    "⚠️ Select a service first.",
-                    reply_markup=back_button(),
-                )
-                return
-
-            await request_number(query, service, country)
+            await order_number(query, context, service, country)
 
     except httpx.HTTPStatusError as exc:
-        log.warning("API returned HTTP %s", exc.response.status_code)
+        log.error("Provider HTTP status: %s", exc.response.status_code)
         await query.edit_message_text(
-            f"⚠️ Provider API returned HTTP "
-            f"{exc.response.status_code}.\n"
-            "Check the official API documentation and credentials.",
-            reply_markup=back_button(),
+            f"⚠️ API HTTP {exc.response.status_code}\n"
+            "Endpoint বা API access যাচাই করো।",
+            reply_markup=back_keyboard(),
         )
 
     except Exception:
-        log.exception("Button handler failed")
+        log.exception("Button handler error")
         await query.edit_message_text(
-            "⚠️ Something went wrong.\n"
-            "Check the Termux log and API response format.",
-            reply_markup=back_button(),
+            "⚠️ সমস্যা হয়েছে। Termux-এর log দেখো।",
+            reply_markup=back_keyboard(),
         )
 
 
@@ -352,7 +335,7 @@ def main():
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(handle_button))
 
-    log.info("Premium Number Bot starting...")
+    log.info("Premium Number Bot is starting")
     app.run_polling()
 
 
